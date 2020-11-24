@@ -1,0 +1,64 @@
+---
+- name: Update apt cache
+  become: yes
+  apt: update_cache=yes
+  tags:
+    - dependencies
+
+- name: Upgrade all safe packages
+  become: yes
+  apt: upgrade=safe
+  tags:
+    - dependencies
+
+- name: Install git
+  become: yes
+  apt: pkg={{ item }} state=present
+  with_items:
+    - git
+  tags:
+    - dependencies
+
+- name: Create gitolite group
+  become: yes
+  group: name=git state=present
+
+- name: Create gitolite user
+  become: yes
+  user: name=git
+    state=present
+    home=/home/git
+    system=yes
+    group=git
+
+- name: Add www-data to the git group
+  become: yes
+  user: name=www-data
+    groups=git
+    append=yes
+
+- name: Copy SSH public key to server
+  become: yes
+  copy: src=/home/lino/.ssh/tower.pub
+    dest=/home/git/{{ main_user_name }}.pub
+    group=git
+    owner=git
+    mode=0644
+
+- name: Clone gitolite
+  become: yes
+  become_user: git
+  git:
+    repo: https://github.com/sitaramc/gitolite.git
+    dest: /home/git/gitolite
+    accept_hostkey: yes
+
+- name: Install gitolite
+  become: yes
+  become_user: git
+  shell: mkdir -p $HOME/bin && $HOME/gitolite/install -to $HOME/bin
+
+- name: Set gitolite up
+  become: yes
+  become_user: git
+  shell: $HOME/bin/gitolite setup -pk $HOME/{{ main_user_name }}.pub
