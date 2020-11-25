@@ -40,7 +40,7 @@
 - name: Copy SSH public key to server
   become: yes
   copy: src=/home/lino/.ssh/tower.pub
-    dest=/home/git/{{ main_user_name }}.pub
+    dest=/home/git/{{ main_user }}.pub
     group=git
     owner=git
     mode=0644
@@ -61,4 +61,4 @@
 - name: Set gitolite up
   become: yes
   become_user: git
-  shell: $HOME/bin/gitolite setup -pk $HOME/{{ main_user_name }}.pub
+  shell: $HOME/bin/gitolite setup -pk $HOME/{{ main_user }}.pub
