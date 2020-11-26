@@ -1,7 +1,5 @@
 ---
-- hosts: vm
-  remote_user: deploy
+- hosts: local-testing
   become: yes
   roles:
-    - gogs
-    # - docker
+    - docker
