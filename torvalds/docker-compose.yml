@@ -1,0 +1,143 @@
+version: "3"
+
+networks:
+  traefik_proxy:
+    external: true
+  inside:
+    internal: true
+
+services:
+  rp:
+    image: traefik:2.3.4
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - traefik_proxy
+      - default
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.sehn.dev`)"
+      - "traefik.http.routers.traefik.entrypoints=web-secure"
+      - "traefik.http.routers.traefik.tls.certresolver=default"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.middlewares=auth@docker"
+      - "traefik.http.middlewares.auth.basicauth.users=lino:$$2y$$05$$EjT3VtVByL36fhryUSf7S.FZOpHBFn3JrHAbZAHcq2/SvBIc0F5CK"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/etc/traefik
+    restart: always
+
+  gitea:
+    image: gitea/gitea:1.13.0
+    container_name: gitea
+    environment:
+      - APP_NAME="git.sehn.dev"
+      - USER_UID=61001
+      - USER_GID=61000
+      - DB_TYPE=postgres
+      - DB_HOST=db:5432
+      - DB_NAME=gitea
+      - DB_USER=gitea
+      - DB_PASSWD=gitea
+    restart: always
+    networks:
+      - traefik_proxy
+      - inside
+    volumes:
+      - /mnt/torvalds-data/gitea:/data
+      - /home/git/.ssh/:/data/git/.ssh  
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "127.0.0.1:64300:22"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.gitea-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.gitea-http.entrypoints=web"
+      - "traefik.http.routers.gitea-http.rule=Host(`git.sehn.dev`)"
+      - "traefik.http.routers.gitea-http.middlewares=gitea-https@docker"
+      - "traefik.http.routers.gitea.entrypoints=web-secure"
+      - "traefik.http.routers.gitea.rule=Host(`git.sehn.dev`)"
+      - "traefik.http.routers.gitea.tls=true"
+      - "traefik.http.routers.gitea.tls.certresolver=default"
+      - "traefik.http.routers.gitea.middlewares=secHeaders@file"
+      - "traefik.http.services.gitea.loadbalancer.server.port=3000"
+    depends_on:
+      - rp
+      - db
+
+  db:
+    image: postgres:9.6
+    container_name: gitea_db
+    restart: always
+    environment:
+      - POSTGRES_USER=gitea
+      - POSTGRES_PASSWORD=gitea
+      - POSTGRES_DB=gitea
+    networks:
+      - inside
+    labels:
+      - "traefik.enable=false"
+    volumes:
+      - /mnt/torvalds-data/gitea/db:/var/lib/postgresql/data
+
+  drone_server:
+    image: drone/drone:1
+    container_name: drone_server
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /mnt/torvalds-data/drone/data:/data
+    environment:
+      - USER_UID=61001
+      - USER_GID=61000
+      - DRONE_GITEA_SERVER=https://git.sehn.dev # Bitte URL anpassen
+      - DRONE_GITEA_CLIENT_ID=860dd318-452d-4ff0-a098-9e03d6f365c2 # GITEA Client ID
+      - DRONE_GITEA_CLIENT_SECRET=ncYvd-Tmd5LFM36yQllFY0fxf7z9QJs6Ppnf3qW4n50= # GITEA Client SECRET
+      - DRONE_RPC_SECRET=3f1e5d29b5190988d22cf4b1ceb8466e # PRC SECRET
+      - DRONE_SERVER_HOST=drone.sehn.dev # Bitte URL anpassen
+      - DRONE_SERVER_PROTO=https
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.middlewares.drone-https.redirectscheme.scheme=https"
+      - "traefik.http.routers.drone-http.entrypoints=web"
+      - "traefik.http.routers.drone-http.rule=Host(`drone.sehn.dev`)" #Domain anpassen
+      - "traefik.http.routers.drone-http.middlewares=drone-https@docker"
+      - "traefik.http.routers.drone.entrypoints=web-secure"
+      - "traefik.http.routers.drone.rule=Host(`drone.sehn.dev`)" #Domain anpassen
+      - "traefik.http.routers.drone.tls=true"
+      - "traefik.http.routers.drone.tls.certresolver=default"
+      - "traefik.http.routers.drone.middlewares=secHeaders@file"
+      - "traefik.http.services.drone.loadbalancer.server.port=80"
+    networks:
+      - traefik_proxy
+      - inside
+    depends_on:
+      - gitea
+
+  drone_runner:
+    image: drone/drone-runner-docker:1
+    container_name: drone_runner
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - DRONE_RPC_PROTO=https
+      - DRONE_RPC_HOST=drone.sehn.dev # Bitte URL anpassen
+      - DRONE_RPC_SECRET=3f1e5d29b5190988d22cf4b1ceb8466e # RPC SECRET (siehe oben)
+      - DRONE_RUNNER_CAPACITY=2
+      - DRONE_RUNNER_NETWORKS=torvalds_default
+    networks:
+      - default
+    ports:
+      - 3000:3000
+    depends_on:
+      - drone_server
